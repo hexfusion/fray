@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hexfusion/fray/pkg/oci"
-	"github.com/hexfusion/fray/pkg/registry"
+	"github.com/hexfusion/fray/pkg/proxy"
 	"github.com/hexfusion/fray/pkg/store"
 )
 
@@ -24,7 +24,7 @@ func TestProxyStartup(t *testing.T) {
 	require.NoError(err)
 
 	client := oci.NewClient()
-	server := registry.New(l, client, registry.DefaultOptions())
+	server := proxy.New(l, client, proxy.DefaultOptions())
 
 	ts := httptest.NewServer(server)
 	defer ts.Close()

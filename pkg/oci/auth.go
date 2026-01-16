@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+const tokenCacheTTL = 5 * time.Minute
+
 // RegistryAuth reads credentials from container config files.
 type RegistryAuth struct {
 	mu       sync.RWMutex
@@ -83,7 +85,7 @@ func (r *RegistryAuth) GetAuth(ctx context.Context, registry, repo string) (stri
 		r.mu.Lock()
 		r.tokens[cacheKey] = tokenEntry{
 			token:   token,
-			expires: time.Now().Add(5 * time.Minute),
+			expires: time.Now().Add(tokenCacheTTL),
 		}
 		r.mu.Unlock()
 

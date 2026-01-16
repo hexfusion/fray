@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,12 @@ import (
 
 	"github.com/hexfusion/fray/pkg/merkle"
 	"github.com/hexfusion/fray/pkg/oci"
+)
+
+var (
+	ErrDigestMismatch    = errors.New("digest mismatch")
+	ErrLayerIncomplete   = errors.New("layer incomplete")
+	ErrChunkSizeMismatch = errors.New("chunk size mismatch")
 )
 
 const (
@@ -70,6 +77,18 @@ type LayerState struct {
 	StorePath string
 }
 
+type fetchJob struct {
+	index      int
+	chunkIndex int
+}
+
+type fetchResult struct {
+	index      int
+	chunkIndex int
+	data       []byte
+	err        error
+}
+
 // GetOrCreateLayer gets existing layer state or creates new.
 func (s *Store) GetOrCreateLayer(digest string, size int64) (*LayerState, error) {
 	storePath := s.layerPath(digest)
@@ -116,7 +135,7 @@ func (s *Store) FetchChunk(ctx context.Context, layer *LayerState, url string, c
 	}
 
 	if len(data) != length {
-		return fmt.Errorf("chunk %d: expected %d bytes, got %d", chunkIndex, length, len(data))
+		return fmt.Errorf("%w: chunk %d expected %d bytes, got %d", ErrChunkSizeMismatch, chunkIndex, length, len(data))
 	}
 
 	chunkPath := filepath.Join(layer.StorePath, fmt.Sprintf("chunk-%05d", chunkIndex))
@@ -144,55 +163,55 @@ func (s *Store) FetchMissing(ctx context.Context, layer *LayerState, url string,
 		return s.fetchMissingSeq(ctx, layer, url, missing, progress)
 	}
 
-	type job struct {
-		index      int
-		chunkIndex int
-	}
-
-	type result struct {
-		index      int
-		chunkIndex int
-		data       []byte
-		err        error
-	}
-
-	jobs := make(chan job, total)
-	results := make(chan result, total)
+	jobs := make(chan fetchJob, total)
+	results := make(chan fetchResult, total)
 
 	var wg sync.WaitGroup
 	for w := 0; w < s.parallelism; w++ {
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := range jobs {
-				select {
-				case <-ctx.Done():
-					results <- result{j.index, j.chunkIndex, nil, ctx.Err()}
-					return
-				default:
-				}
-
-				start := layer.Tree.ChunkOffset(j.chunkIndex)
-				length := layer.Tree.ChunkLength(j.chunkIndex)
-				end := start + int64(length)
-
-				data, err := s.fetcher.FetchRange(ctx, url, start, end)
-				results <- result{j.index, j.chunkIndex, data, err}
-			}
-		}()
+		go s.fetchWorker(ctx, layer, url, jobs, results, &wg)
 	}
 
 	go func() {
 		for i, chunkIndex := range missing {
-			jobs <- job{i, chunkIndex}
+			jobs <- fetchJob{i, chunkIndex}
 		}
 		close(jobs)
 	}()
 
+	firstErr := s.collectResults(layer, results, total, progress)
+
+	wg.Wait()
+	s.SaveState(layer)
+
+	return firstErr
+}
+
+func (s *Store) fetchWorker(ctx context.Context, layer *LayerState, url string, jobs <-chan fetchJob, results chan<- fetchResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for j := range jobs {
+		select {
+		case <-ctx.Done():
+			results <- fetchResult{j.index, j.chunkIndex, nil, ctx.Err()}
+			return
+		default:
+		}
+
+		start := layer.Tree.ChunkOffset(j.chunkIndex)
+		length := layer.Tree.ChunkLength(j.chunkIndex)
+		end := start + int64(length)
+
+		data, err := s.fetcher.FetchRange(ctx, url, start, end)
+		results <- fetchResult{j.index, j.chunkIndex, data, err}
+	}
+}
+
+func (s *Store) collectResults(layer *LayerState, results <-chan fetchResult, total int, progress func(int, int)) error {
 	var firstErr error
 	completed := 0
 
-	for i := 0; i < total; i++ {
+	for range total {
 		r := <-results
 
 		if r.err != nil && firstErr == nil {
@@ -227,9 +246,6 @@ func (s *Store) FetchMissing(ctx context.Context, layer *LayerState, url string,
 		}
 	}
 
-	wg.Wait()
-	s.SaveState(layer)
-
 	return firstErr
 }
 
@@ -263,8 +279,8 @@ func (s *Store) fetchMissingSeq(ctx context.Context, layer *LayerState, url stri
 // AssembleBlob assembles all chunks into the final blob.
 func (s *Store) AssembleBlob(layer *LayerState) (string, error) {
 	if !layer.Tree.Complete() {
-		return "", fmt.Errorf("layer not complete: %d/%d chunks",
-			layer.Tree.PresentCount, layer.Tree.NumChunks)
+		return "", fmt.Errorf("%w: %d/%d chunks",
+			ErrLayerIncomplete, layer.Tree.PresentCount, layer.Tree.NumChunks)
 	}
 
 	blobPath := filepath.Join(layer.StorePath, "blob")
@@ -293,7 +309,7 @@ func (s *Store) AssembleBlob(layer *LayerState) (string, error) {
 	computedDigest := "sha256:" + hex.EncodeToString(hasher.Sum(nil))
 	if computedDigest != layer.Digest {
 		os.Remove(blobPath)
-		return "", fmt.Errorf("digest mismatch: expected %s, got %s", layer.Digest, computedDigest)
+		return "", fmt.Errorf("%w: expected %s, got %s", ErrDigestMismatch, layer.Digest, computedDigest)
 	}
 
 	return blobPath, nil

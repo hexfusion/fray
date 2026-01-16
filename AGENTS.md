@@ -71,6 +71,20 @@ type Client struct { ... }
 func (c *Client) GetManifest(ctx context.Context, ref string) (*Manifest, error)
 ```
 
+Struct field comments go above the field, never inline:
+```go
+// good
+type Options struct {
+	// Timeout is the maximum duration for the operation.
+	Timeout time.Duration
+}
+
+// bad
+type Options struct {
+	Timeout time.Duration // maximum duration
+}
+```
+
 ## Lifecycle
 
 Graceful termination is bulletproof. Signal-driven (SIGTERM, SIGINT).

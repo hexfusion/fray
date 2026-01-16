@@ -14,11 +14,18 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/hexfusion/fray/internal/prune"
 	"github.com/hexfusion/fray/internal/version"
 	"github.com/hexfusion/fray/pkg/logging"
 	"github.com/hexfusion/fray/pkg/oci"
-	"github.com/hexfusion/fray/pkg/registry"
+	"github.com/hexfusion/fray/pkg/proxy"
 	"github.com/hexfusion/fray/pkg/store"
+)
+
+const (
+	rootCacheDir     = "/var/lib/containers/fray"
+	rootlessCacheDir = ".local/share/containers/fray"
+	cacheEnvVar      = "FRAY_CACHE_DIR"
 )
 
 func main() {
@@ -37,6 +44,8 @@ func main() {
 		cmdProxy(os.Args[2:])
 	case "status":
 		cmdStatus(log, os.Args[2:])
+	case "prune":
+		cmdPrune(log, os.Args[2:])
 	case "version":
 		cmdVersion(os.Args[2:])
 	case "help", "-h", "--help":
@@ -45,6 +54,19 @@ func main() {
 		log.Error("unknown command", zap.String("command", os.Args[1]))
 		os.Exit(1)
 	}
+}
+
+func defaultCacheDir() string {
+	if dir := os.Getenv(cacheEnvVar); dir != "" {
+		return dir
+	}
+	if os.Getuid() == 0 {
+		return rootCacheDir
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, rootlessCacheDir)
+	}
+	return "./fray-cache"
 }
 
 func newConsoleLogger() *zap.Logger {
@@ -64,6 +86,7 @@ func printUsage(log *zap.Logger) {
 		zap.String("pull", "pull image to OCI layout"),
 		zap.String("proxy", "run pull-through caching proxy"),
 		zap.String("status", "show layout status"),
+		zap.String("prune", "remove incomplete downloads and temp files"),
 		zap.String("version", "show version information"),
 	)
 	log.Info("run 'fray <command> -h' for command options")
@@ -95,7 +118,7 @@ func cmdVersion(args []string) {
 
 func cmdPull(log *zap.Logger, args []string) {
 	fs := flag.NewFlagSet("pull", flag.ExitOnError)
-	output := fs.String("o", "./oci-layout", "output directory")
+	output := fs.String("o", defaultCacheDir(), "output directory")
 	chunkSize := fs.Int("c", 1024*1024, "chunk size in bytes")
 	parallel := fs.Int("p", 4, "parallel downloads")
 
@@ -167,7 +190,7 @@ func cmdPull(log *zap.Logger, args []string) {
 func cmdProxy(args []string) {
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
 	listen := fs.String("l", ":5000", "listen address")
-	dataDir := fs.String("d", "./fray-cache", "data directory")
+	dataDir := fs.String("d", defaultCacheDir(), "data directory")
 	chunkSize := fs.Int("c", 1024*1024, "chunk size in bytes")
 	parallel := fs.Int("p", 4, "parallel downloads")
 	logFile := fs.String("log-file", "", "log file path")
@@ -203,7 +226,7 @@ func cmdProxy(args []string) {
 	client := oci.NewClient()
 	client.SetAuth(oci.NewRegistryAuth())
 
-	server := registry.New(l, client, registry.Options{
+	server := proxy.New(l, client, proxy.Options{
 		ChunkSize: *chunkSize,
 		Parallel:  *parallel,
 		Logger:    log,
@@ -251,7 +274,7 @@ func cmdStatus(log *zap.Logger, args []string) {
 		os.Exit(1)
 	}
 
-	dir := "./oci-layout"
+	dir := defaultCacheDir()
 	if fs.NArg() > 0 {
 		dir = fs.Arg(0)
 	}
@@ -299,4 +322,60 @@ func cmdStatus(log *zap.Logger, args []string) {
 			log.Info("in_progress", zap.String("state", e.Name()))
 		}
 	}
+}
+
+func cmdPrune(log *zap.Logger, args []string) {
+	fs := flag.NewFlagSet("prune", flag.ExitOnError)
+	dryRun := fs.Bool("dry-run", false, "show what would be deleted without deleting")
+
+	if err := fs.Parse(args); err != nil {
+		os.Exit(1)
+	}
+
+	dir := defaultCacheDir()
+	if fs.NArg() > 0 {
+		dir = fs.Arg(0)
+	}
+
+	opts := prune.Options{
+		DryRun: *dryRun,
+		OnItem: func(item prune.Item) {
+			if *dryRun {
+				if item.IsDir {
+					log.Info("would delete", zap.String("dir", item.Path), zap.Int64("bytes", item.Bytes), zap.Int("files", item.Files))
+				} else {
+					log.Info("would delete", zap.String("file", item.Path), zap.Int64("bytes", item.Bytes))
+				}
+			}
+		},
+		OnDelete: func(item prune.Item, err error) {
+			if err != nil {
+				log.Warn("failed to remove", zap.String("path", item.Path), zap.Error(err))
+			} else {
+				log.Debug("removed", zap.String("path", item.Path))
+			}
+		},
+	}
+
+	result, err := prune.Run(dir, opts)
+	if err != nil {
+		log.Error("prune failed", zap.String("path", dir), zap.Error(err))
+		os.Exit(1)
+	}
+
+	if result == nil || result.Files == 0 {
+		log.Info("nothing to prune")
+		return
+	}
+
+	action := "pruned"
+	if *dryRun {
+		action = "would prune"
+	}
+
+	log.Info(action,
+		zap.Int("files", result.Files),
+		zap.Int64("bytes", result.Bytes),
+		zap.String("human", prune.HumanBytes(result.Bytes)),
+	)
 }
