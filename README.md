@@ -9,16 +9,16 @@ Resumable OCI image pulls for unreliable networks.
 
 ## The Problem
 
-OCI image layers can be hundreds of megabytes. On unreliable networks, a failed pull means starting over.
+OCI image layers can be massive - [bootc](https://github.com/containers/bootc) OS images often have layers of 800MB or more. On unreliable edge networks, a failed pull means starting over.
 
 ## How Fray Solves It
 
 Fray splits each layer into chunks and tracks progress with a merkle tree. Interrupted pulls resume from where they left off.
 
 ```
-Traditional:  Layer (500MB) ----------------------> FAIL -> restart from 0
+Traditional:  Layer (800MB) ------------------------> FAIL -> restart from 0
 
-Fray:         Layer (500MB)
+Fray:         Layer (800MB)
               +-----+-----+-----+-----+-----+-----+
               |  #  |  #  |  #  |  x  |     |     |  <- interrupt
               +-----+-----+-----+-----+-----+-----+
@@ -103,9 +103,9 @@ systemctl enable --now fray-proxy
 
 See `dist/systemd/fray-proxy.service` for the unit file.
 
-### Logically Bound Images (bootc)
+### bootc
 
-Fray can be deployed as a [logically bound image](https://bootc-dev.github.io/bootc/logically-bound-images.html) for bootc-based systems:
+[bootc](https://github.com/containers/bootc) enables transactional, image-based OS updates using OCI containers. Fray can be deployed as a [logically bound image](https://bootc-dev.github.io/bootc/logically-bound-images.html):
 
 ```dockerfile
 FROM quay.io/centos-bootc/centos-bootc:stream9
@@ -113,6 +113,8 @@ COPY --from=ghcr.io/hexfusion/fray:latest / /
 ```
 
 This embeds fray into the OS image - no container runtime needed at the edge.
+
+See the [bootc documentation](https://bootc-dev.github.io/bootc/) for more details.
 
 ## License
 
