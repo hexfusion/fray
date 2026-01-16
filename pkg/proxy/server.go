@@ -1,4 +1,4 @@
-package registry
+package proxy
 
 import (
 	"context"
@@ -32,7 +32,13 @@ type pullState struct {
 	err  error
 }
 
-// Options configures the registry server.
+const (
+	DefaultChunkSize   = 1024 * 1024 // 1MB
+	DefaultParallel    = 4
+	DefaultPullTimeout = 30 * 60 // 30 minutes in seconds
+)
+
+// Options configures the proxy server.
 type Options struct {
 	// chunk size for resumable downloads
 	ChunkSize int
@@ -47,22 +53,22 @@ type Options struct {
 // DefaultOptions returns sensible defaults.
 func DefaultOptions() Options {
 	return Options{
-		ChunkSize:   1024 * 1024,
-		Parallel:    4,
-		PullTimeout: 30 * 60, // 30 minutes in seconds
+		ChunkSize:   DefaultChunkSize,
+		Parallel:    DefaultParallel,
+		PullTimeout: DefaultPullTimeout,
 	}
 }
 
-// New creates a new registry server.
+// New creates a new proxy server.
 func New(l *store.Layout, client *oci.Client, opts Options) *Server {
 	if opts.ChunkSize == 0 {
-		opts.ChunkSize = 1024 * 1024
+		opts.ChunkSize = DefaultChunkSize
 	}
 	if opts.Parallel == 0 {
-		opts.Parallel = 4
+		opts.Parallel = DefaultParallel
 	}
 	if opts.PullTimeout == 0 {
-		opts.PullTimeout = 30 * 60
+		opts.PullTimeout = DefaultPullTimeout
 	}
 	return &Server{
 		layout:  l,

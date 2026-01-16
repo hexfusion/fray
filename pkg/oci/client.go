@@ -3,11 +3,18 @@ package oci
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"runtime"
 	"strings"
+)
+
+var (
+	ErrUnauthorized = errors.New("unauthorized")
+	ErrNotFound     = errors.New("not found")
+	ErrNoManifest   = errors.New("no matching manifest")
 )
 
 const (
@@ -163,11 +170,11 @@ func (c *Client) doManifestRequest(ctx context.Context, url, registry, repo stri
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		return nil, "", fmt.Errorf("unauthorized: %s", registry)
+		return nil, "", fmt.Errorf("%w: %s", ErrUnauthorized, registry)
 	}
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, "", fmt.Errorf("not found: %s", url)
+		return nil, "", fmt.Errorf("%w: %s", ErrNotFound, url)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -260,7 +267,7 @@ func (c *Client) doBlobRequest(ctx context.Context, url, registry, repo, rangeHe
 
 	if resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
-		return nil, fmt.Errorf("unauthorized: %s", registry)
+		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, registry)
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
@@ -297,7 +304,7 @@ func selectPlatform(list ManifestList) (string, error) {
 		available = append(available, fmt.Sprintf("%s/%s", m.Platform.OS, m.Platform.Architecture))
 	}
 
-	return "", fmt.Errorf("no manifest for %s/%s, available: %v", targetOS, targetArch, available)
+	return "", fmt.Errorf("%w for %s/%s, available: %v", ErrNoManifest, targetOS, targetArch, available)
 }
 
 // ParseImageRef parses an image reference into registry, repo, and tag/digest.

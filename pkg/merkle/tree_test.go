@@ -1,8 +1,11 @@
 package merkle
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/stretchr/testify/require"
 )
 
@@ -341,4 +344,38 @@ func TestProgress(t *testing.T) {
 			require.Equal(tt.wantProgress, tree.Progress())
 		})
 	}
+}
+
+// Run benchmarks: go test -bench=. ./pkg/merkle/...
+
+func BenchmarkXXHash64(b *testing.B) {
+	sizes := []int{1, 10, 100}
+	for _, sizeMB := range sizes {
+		data := make([]byte, sizeMB*1024*1024)
+		b.Run(sizeLabel(sizeMB), func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				xxhash.Sum64(data)
+			}
+		})
+	}
+}
+
+func BenchmarkSHA256(b *testing.B) {
+	sizes := []int{1, 10, 100}
+	for _, sizeMB := range sizes {
+		data := make([]byte, sizeMB*1024*1024)
+		b.Run(sizeLabel(sizeMB), func(b *testing.B) {
+			b.SetBytes(int64(len(data)))
+			for b.Loop() {
+				h := sha256.New()
+				h.Write(data)
+				h.Sum(nil)
+			}
+		})
+	}
+}
+
+func sizeLabel(mb int) string {
+	return fmt.Sprintf("%dMB", mb)
 }
