@@ -9,6 +9,7 @@ ARG GIT_TREE_STATE=unknown
 
 USER root
 WORKDIR /src
+ENV GOTOOLCHAIN=auto
 
 COPY go.mod go.sum ./
 RUN go mod download
