@@ -50,8 +50,8 @@ go install github.com/hexfusion/fray/cmd/fray@latest
 Pull an image to an OCI layout directory:
 
 ```bash
-fray pull alpine:latest
-fray pull -o ./images -p 8 registry.example.com/myapp:v1.2
+fray pull quay.io/prometheus/busybox:latest
+fray pull -o ./images -p 8 quay.io/myorg/myapp:v1.2
 ```
 
 Options:
