@@ -91,25 +91,6 @@ Critical concern. Optimize for:
 
 Profile before optimizing. Measure after.
 
-## Deployment
-
-Runs as a systemd unit. See `dist/systemd/fray-proxy.service`.
-
-```bash
-systemctl enable --now fray-proxy
-```
-
-### Logically Bound Images (bootc)
-
-Fray can be deployed as a [logically bound image](https://bootc-dev.github.io/bootc/logically-bound-images.html) for bootc-based systems:
-
-```dockerfile
-FROM quay.io/centos-bootc/centos-bootc:stream9
-COPY --from=ghcr.io/hexfusion/fray:latest / /
-```
-
-This embeds fray into the OS image - no container runtime needed at the edge.
-
 ## General
 
 Less is more.

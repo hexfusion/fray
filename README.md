@@ -91,6 +91,29 @@ Fray reads credentials from standard locations:
 2. `${XDG_RUNTIME_DIR}/containers/auth.json`
 3. `REGISTRY_AUTH_FILE` environment variable
 
+## Deployment
+
+### Systemd
+
+Run as a systemd unit:
+
+```bash
+systemctl enable --now fray-proxy
+```
+
+See `dist/systemd/fray-proxy.service` for the unit file.
+
+### Logically Bound Images (bootc)
+
+Fray can be deployed as a [logically bound image](https://bootc-dev.github.io/bootc/logically-bound-images.html) for bootc-based systems:
+
+```dockerfile
+FROM quay.io/centos-bootc/centos-bootc:stream9
+COPY --from=ghcr.io/hexfusion/fray:latest / /
+```
+
+This embeds fray into the OS image - no container runtime needed at the edge.
+
 ## License
 
 Apache 2.0
