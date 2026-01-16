@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.22-alpine AS builder
+FROM --platform=$BUILDPLATFORM registry.access.redhat.com/ubi9/go-toolset:1.22 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -7,6 +7,7 @@ ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 ARG GIT_TREE_STATE=unknown
 
+USER root
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -22,10 +23,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
         -X github.com/hexfusion/fray/pkg/version.gitTreeState=${GIT_TREE_STATE}" \
     -o /fray ./cmd/fray
 
-FROM scratch
+FROM registry.access.redhat.com/ubi9-micro:latest
 
 COPY --from=builder /fray /fray
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 EXPOSE 5000
 
