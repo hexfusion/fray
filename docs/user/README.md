@@ -27,9 +27,9 @@ podman pull ghcr.io/hexfusion/fray:latest
 Pull an image to an OCI layout directory:
 
 ```bash
-fray pull alpine:latest
-fray pull -o /var/lib/images alpine:latest
-fray pull -c 4194304 -p 8 registry.example.com/myimage:v1
+fray pull quay.io/prometheus/busybox:latest
+fray pull -o /var/lib/images quay.io/fedora/fedora:latest
+fray pull -c 4194304 -p 8 quay.io/myorg/myimage:v1
 ```
 
 Options:
@@ -86,7 +86,7 @@ Configure podman to use fray as a registry mirror:
 fray proxy -l :5000 -d /var/cache/fray &
 
 # Pull through fray
-podman pull --tls-verify=false localhost:5000/docker.io/library/alpine:latest
+podman pull --tls-verify=false localhost:5000/quay.io/fedora/fedora:latest
 ```
 
 ### With containers-registries.conf
@@ -95,10 +95,10 @@ Add to `/etc/containers/registries.conf.d/fray.conf`:
 
 ```toml
 [[registry]]
-location = "docker.io"
+location = "quay.io"
 
 [[registry.mirror]]
-location = "localhost:5000/docker.io"
+location = "localhost:5000/quay.io"
 insecure = true
 ```
 
