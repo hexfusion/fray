@@ -1,0 +1,13 @@
+# Binaries
+/fray
+/benchmark
+/dist/
+*.exe
+
+# IDE
+.idea/
+.vscode/
+
+# Test artifacts
+*.test
+coverage.out

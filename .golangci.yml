@@ -1,0 +1,91 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - errorlint
+    - gofmt
+    - goimports
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - forbidigo
+    - wrapcheck
+
+linters-settings:
+  forbidigo:
+    forbid:
+      - p: fmt\.Print(|f|ln)
+        msg: use zap logging instead of fmt.Print
+      - p: log\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)
+        msg: use zap logging instead of log package
+
+  wrapcheck:
+    ignoreSigs:
+      - .Errorf(
+      - errors.New(
+      - errors.Unwrap(
+      - errors.Join(
+      - .Wrap(
+      - .Wrapf(
+      - .WithMessage(
+      - .WithMessagef(
+      - .WithStack(
+    ignoreSigRegexps:
+      - \.Close\(
+      - io\.Copy\(
+      - io\.ReadAll\(
+      - os\.(Open|ReadFile|ReadDir|WriteFile|MkdirAll|Stat|Remove)\(
+      - json\.(Marshal|Unmarshal|MarshalIndent)\(
+      - http\.NewRequestWithContext\(
+      - http\.Client.*\.Do\(
+      - strconv\.Parse
+      - url\.Parse\(
+      - base64\..*\.DecodeString\(
+    ignorePackageGlobs:
+      - github.com/hexfusion/fray/*
+
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+
+issues:
+  exclude-rules:
+    # relaxed rules for test files
+    - path: _test\.go
+      linters:
+        - forbidigo
+        - errcheck
+        - wrapcheck
+    # cli commands use fmt for user output
+    - path: cmd/fray/
+      linters:
+        - forbidigo
+    # relaxed rules for benchmark/test commands
+    - path: cmd/(hashbench|imagetest|benchmark)/
+      linters:
+        - forbidigo
+        - errcheck
+        - wrapcheck
+        - ineffassign
+        - gofmt
+        - goimports
+        - unparam
+        - staticcheck
+    # legacy packages pending cleanup
+    - path: pkg/(store|fetcher)/
+      linters:
+        - errcheck
+        - wrapcheck
+    # io.Copy to http.ResponseWriter can fail on client disconnect
+    - linters:
+        - errcheck
+      text: "Error return value of `io.Copy` is not checked"
