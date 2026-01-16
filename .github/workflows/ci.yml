@@ -103,9 +103,10 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            type=raw,value=latest
 
       - name: build and push container
+        id: container
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -119,3 +120,21 @@ jobs:
             COMMIT=${{ github.sha }}
             BUILD_DATE=${{ github.event.head_commit.timestamp }}
             GIT_TREE_STATE=clean
+
+      - name: update release with container info
+        uses: softprops/action-gh-release@v1
+        with:
+          append_body: true
+          body: |
+
+            ## Container Image
+
+            ```bash
+            podman pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+            ```
+
+            **Tags:** `${{ steps.meta.outputs.version }}`, `latest`
+
+            **Digest:** `${{ steps.container.outputs.digest }}`
+
+            **Platforms:** linux/amd64, linux/arm64
