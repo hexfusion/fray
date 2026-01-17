@@ -5,11 +5,13 @@
 ```
 cmd/fray/           CLI entrypoint
 pkg/
-  layout/           OCI image layout storage
+  store/            OCI image layout storage and puller
   merkle/           Merkle tree for chunk tracking
   oci/              OCI registry client
-  registry/         Pull-through caching proxy server
-  logging/          Zap + lumberjack logging
+  proxy/            Pull-through caching proxy server
+  logging/          Logger interface with zap + lumberjack
+internal/
+  prune/            Cleanup incomplete downloads
   version/          Build version info
 ```
 
@@ -18,19 +20,20 @@ pkg/
 **Merkle Tree** (`pkg/merkle/`)
 - Tracks downloaded chunks for resumable transfers
 - Serializes state to disk for crash recovery
-- Enables efficient diff between partial downloads
+- Uses xxHash64 for fast chunk verification
 
 **OCI Client** (`pkg/oci/`)
 - Fetches manifests and blobs from registries
 - Handles Docker Hub and GHCR token auth
 - Supports HTTP Range requests for chunked downloads
 
-**Layout** (`pkg/layout/`)
+**Store** (`pkg/store/`)
 - OCI Image Layout spec storage
 - Content-addressable blob store
-- Partial blob support for resumable writes
+- Puller with resumable chunked downloads
+- Chunk verification on resume
 
-**Registry Proxy** (`pkg/registry/`)
+**Proxy** (`pkg/proxy/`)
 - OCI Distribution API (read-only)
 - Pull-through caching
 - Deduplicates concurrent pulls
@@ -38,12 +41,14 @@ pkg/
 ## Building
 
 ```bash
-make build          # build binary
-make test-unit      # run unit tests
-make test-integration # run integration tests
-make lint           # run golangci-lint
-make release        # build all platforms
-make image          # build container image
+make build              # build binary
+make test               # run unit + e2e tests
+make test-unit          # run unit tests
+make test-e2e           # run e2e tests (no network)
+make test-e2e-integration # run e2e tests (pulls from registries)
+make lint               # run golangci-lint
+make release            # build all platforms
+make image              # build container image
 ```
 
 ## Testing

@@ -5,8 +5,6 @@
 
 Resumable OCI image pulls for unreliable networks.
 
-**Status:** Experimental - APIs may change.
-
 ## The Problem
 
 OCI image layers can be massive - [bootc](https://github.com/containers/bootc) OS images often have layers of 800MB or more. On unreliable edge networks, a failed pull means starting over.
@@ -29,92 +27,43 @@ Fray:         Layer (800MB)
               +-----+-----+-----+-----+-----+-----+
 ```
 
+## Quick Start
+
+```bash
+# Install
+go install github.com/hexfusion/fray/cmd/fray@latest
+
+# Pull an image
+fray pull quay.io/prometheus/busybox:latest
+
+# Run proxy
+fray proxy -l :5000 -d /var/cache/fray &
+podman pull --tls-verify=false localhost:5000/docker.io/library/alpine:latest
+```
+
 ## Features
 
 - **Resumable pulls** - chunk state persists across restarts
 - **No server changes** - uses standard HTTP Range requests
 - **Pull-through proxy** - caching registry for edge clusters
 - **Parallel downloads** - configurable concurrency
-- **OCI Image Layout** - standard storage format with content-addressable deduplication
+- **OCI Image Layout** - standard storage format
 
-## Installation
+## Documentation
 
-```bash
-go install github.com/hexfusion/fray/cmd/fray@latest
-```
-
-## Commands
-
-### pull
-
-Pull an image to an OCI layout directory:
-
-```bash
-fray pull quay.io/prometheus/busybox:latest
-fray pull -o ./images -p 8 quay.io/myorg/myapp:v1.2
-```
-
-Options:
-- `-o` - output directory (default: `./oci-layout`)
-- `-p` - parallel downloads (default: 4)
-- `-c` - chunk size in bytes (default: 1MB)
-
-### proxy
-
-Run a pull-through caching proxy:
-
-```bash
-fray proxy -l :5000 -d /var/cache/fray
-```
-
-Configure your container runtime to use `localhost:5000` as a registry mirror. First pull downloads and caches; subsequent pulls are served from cache with resumable chunk support.
-
-Options:
-- `-l` - listen address (default: `:5000`)
-- `-d` - cache directory (default: `./fray-cache`)
-- `-p` - parallel downloads (default: 4)
-- `--log-file` - log to file instead of stderr
-
-### status
-
-Show layout contents and in-progress pulls:
-
-```bash
-fray status ./oci-layout
-```
-
-## Authentication
-
-Fray reads credentials from standard locations:
-
-1. `~/.docker/config.json`
-2. `${XDG_RUNTIME_DIR}/containers/auth.json`
-3. `REGISTRY_AUTH_FILE` environment variable
+- [User Guide](docs/user/README.md) - commands, options, proxy setup
+- [Developer Guide](docs/dev/README.md) - architecture, building, testing
 
 ## Deployment
 
-### Systemd
-
-Run as a systemd unit:
-
-```bash
-systemctl enable --now fray-proxy
-```
-
-See `dist/systemd/fray-proxy.service` for the unit file.
-
 ### bootc
 
-[bootc](https://github.com/containers/bootc) enables transactional, image-based OS updates using OCI containers. Fray can be deployed as a [logically bound image](https://bootc-dev.github.io/bootc/logically-bound-images.html):
+[bootc](https://github.com/containers/bootc) enables transactional, image-based OS updates. Fray can be deployed as a [logically bound image](https://bootc-dev.github.io/bootc/logically-bound-images.html):
 
 ```dockerfile
 FROM quay.io/centos-bootc/centos-bootc:stream9
 COPY --from=ghcr.io/hexfusion/fray:latest / /
 ```
-
-This embeds fray into the OS image - no container runtime needed at the edge.
-
-See the [bootc documentation](https://bootc-dev.github.io/bootc/) for more details.
 
 ## License
 
