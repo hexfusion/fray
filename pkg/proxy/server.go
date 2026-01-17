@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/hexfusion/fray/pkg/logging"
 	"github.com/hexfusion/fray/pkg/oci"
 	"github.com/hexfusion/fray/pkg/store"
 )
@@ -22,6 +23,7 @@ import (
 type Server struct {
 	layout  *store.Layout
 	client  *oci.Client
+	log     logging.Logger
 	opts    Options
 	pulling map[string]*pullState
 	mu      sync.Mutex
@@ -40,14 +42,9 @@ const (
 
 // Options configures the proxy server.
 type Options struct {
-	// chunk size for resumable downloads
-	ChunkSize int
-	// parallel chunk downloads
-	Parallel int
-	// upstream pull timeout in seconds
+	ChunkSize   int
+	Parallel    int
 	PullTimeout int
-	// structured logging
-	Logger *zap.Logger
 }
 
 // DefaultOptions returns sensible defaults.
@@ -60,7 +57,7 @@ func DefaultOptions() Options {
 }
 
 // New creates a new proxy server.
-func New(l *store.Layout, client *oci.Client, opts Options) *Server {
+func New(l *store.Layout, client *oci.Client, log logging.Logger, opts Options) *Server {
 	if opts.ChunkSize == 0 {
 		opts.ChunkSize = DefaultChunkSize
 	}
@@ -73,6 +70,7 @@ func New(l *store.Layout, client *oci.Client, opts Options) *Server {
 	return &Server{
 		layout:  l,
 		client:  client,
+		log:     log,
 		opts:    opts,
 		pulling: make(map[string]*pullState),
 	}
@@ -84,13 +82,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 
 	defer func() {
-		if s.opts.Logger != nil {
-			s.opts.Logger.Info("request",
-				zap.String("method", r.Method),
-				zap.String("path", path),
-				zap.Duration("latency", time.Since(start)),
-			)
-		}
+		s.log.Info("request",
+			zap.String("method", r.Method),
+			zap.String("path", path),
+			zap.Duration("latency", time.Since(start)),
+		)
 	}()
 
 	if path == "/v2/" || path == "/v2" {
@@ -139,26 +135,26 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request, registry
 
 	digest, err := s.findManifestDigest(image)
 	if err != nil {
-		s.log().Info("cache miss, pulling from upstream", zap.String("image", image))
+		s.log.Info("cache miss, pulling from upstream", zap.String("image", image))
 		if err := s.pullImage(r.Context(), image); err != nil {
-			s.log().Error("upstream pull failed", zap.String("image", image), zap.Error(err))
+			s.log.Error("upstream pull failed", zap.String("image", image), zap.Error(err))
 			http.Error(w, fmt.Sprintf("upstream pull failed: %v", err), http.StatusBadGateway)
 			return
 		}
 		digest, err = s.findManifestDigest(image)
 		if err != nil {
-			s.log().Error("manifest not found after pull", zap.String("image", image), zap.Error(err))
+			s.log.Error("manifest not found after pull", zap.String("image", image), zap.Error(err))
 			http.Error(w, "manifest not found after pull", http.StatusInternalServerError)
 			return
 		}
-		s.log().Info("pull complete", zap.String("image", image))
+		s.log.Info("pull complete", zap.String("image", image))
 	} else {
-		s.log().Debug("cache hit", zap.String("image", image))
+		s.log.Debug("cache hit", zap.String("image", image))
 	}
 
 	data, err := s.layout.ReadBlob(digest)
 	if err != nil {
-		s.log().Error("read manifest blob failed", zap.String("digest", digest), zap.Error(err))
+		s.log.Error("read manifest blob failed", zap.String("digest", digest), zap.Error(err))
 		http.Error(w, "failed to read manifest", http.StatusInternalServerError)
 		return
 	}
@@ -243,7 +239,7 @@ func (s *Server) pullImage(ctx context.Context, image string) error {
 	s.pulling[image] = state
 	s.mu.Unlock()
 
-	puller := store.NewPuller(s.layout, s.client, store.PullOptions{
+	puller := store.NewPuller(s.layout, s.client, s.log, store.PullOptions{
 		ChunkSize: s.opts.ChunkSize,
 		Parallel:  s.opts.Parallel,
 	})
@@ -259,13 +255,6 @@ func (s *Server) pullImage(ctx context.Context, image string) error {
 	}()
 
 	return err
-}
-
-func (s *Server) log() *zap.Logger {
-	if s.opts.Logger != nil {
-		return s.opts.Logger
-	}
-	return zap.NewNop()
 }
 
 func detectMediaType(data []byte) string {

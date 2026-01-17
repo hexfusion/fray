@@ -1,4 +1,4 @@
-.PHONY: build clean test-unit test-integration lint install release image push
+.PHONY: build clean test test-unit test-e2e test-e2e-integration test-integration lint install release image push
 
 BINARY := fray
 IMAGE_REPO ?= ghcr.io/hexfusion/fray
@@ -21,8 +21,16 @@ clean:
 	rm -f $(BINARY)
 	rm -rf dist/
 
+test: test-unit test-e2e
+
 test-unit:
-	go test -race ./...
+	go test -race ./pkg/... ./internal/...
+
+test-e2e:
+	go test -v ./test/e2e/... --ginkgo.label-filter='!integration' --ginkgo.v
+
+test-e2e-integration:
+	go test -v ./test/e2e/... --ginkgo.label-filter='integration' --ginkgo.v -timeout 5m
 
 test-integration:
 	go test -race -tags=integration ./test/...

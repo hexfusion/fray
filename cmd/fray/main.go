@@ -29,7 +29,7 @@ const (
 )
 
 func main() {
-	log := newConsoleLogger()
+	log := logging.NewConsole()
 	defer func() { _ = log.Sync() }()
 
 	if len(os.Args) < 2 {
@@ -69,16 +69,7 @@ func defaultCacheDir() string {
 	return "./fray-cache"
 }
 
-func newConsoleLogger() *zap.Logger {
-	cfg := zap.NewDevelopmentConfig()
-	cfg.EncoderConfig.TimeKey = ""
-	cfg.EncoderConfig.CallerKey = ""
-	cfg.DisableStacktrace = true
-	log, _ := cfg.Build()
-	return log
-}
-
-func printUsage(log *zap.Logger) {
+func printUsage(log logging.Logger) {
 	log.Info("fray - edge-native OCI image puller",
 		zap.String("usage", "fray <command> [options]"),
 	)
@@ -116,7 +107,7 @@ func cmdVersion(args []string) {
 	fmt.Printf("  platform:  %s\n", info.Platform)
 }
 
-func cmdPull(log *zap.Logger, args []string) {
+func cmdPull(log logging.Logger, args []string) {
 	fs := flag.NewFlagSet("pull", flag.ExitOnError)
 	output := fs.String("o", defaultCacheDir(), "output directory")
 	chunkSize := fs.Int("c", 1024*1024, "chunk size in bytes")
@@ -160,7 +151,7 @@ func cmdPull(log *zap.Logger, args []string) {
 		},
 	}
 
-	puller := store.NewPuller(l, client, opts)
+	puller := store.NewPuller(l, client, log, opts)
 	start := time.Now()
 
 	result, err := puller.Pull(ctx, image)
@@ -226,10 +217,9 @@ func cmdProxy(args []string) {
 	client := oci.NewClient()
 	client.SetAuth(oci.NewRegistryAuth())
 
-	server := proxy.New(l, client, proxy.Options{
+	server := proxy.New(l, client, log, proxy.Options{
 		ChunkSize: *chunkSize,
 		Parallel:  *parallel,
-		Logger:    log,
 	})
 
 	httpServer := &http.Server{
@@ -268,7 +258,7 @@ func cmdProxy(args []string) {
 	<-done
 }
 
-func cmdStatus(log *zap.Logger, args []string) {
+func cmdStatus(log logging.Logger, args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -324,7 +314,7 @@ func cmdStatus(log *zap.Logger, args []string) {
 	}
 }
 
-func cmdPrune(log *zap.Logger, args []string) {
+func cmdPrune(log logging.Logger, args []string) {
 	fs := flag.NewFlagSet("prune", flag.ExitOnError)
 	dryRun := fs.Bool("dry-run", false, "show what would be deleted without deleting")
 

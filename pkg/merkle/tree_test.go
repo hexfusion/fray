@@ -3,6 +3,8 @@ package merkle
 import (
 	"crypto/sha256"
 	"fmt"
+	"os"
+	"sync"
 	"testing"
 
 	"github.com/cespare/xxhash/v2"
@@ -378,4 +380,70 @@ func BenchmarkSHA256(b *testing.B) {
 
 func sizeLabel(mb int) string {
 	return fmt.Sprintf("%dMB", mb)
+}
+
+// BenchmarkChunkVerification simulates verifying chunks on resume:
+// read from disk + xxHash64 verification
+func BenchmarkChunkVerification(b *testing.B) {
+	dir := b.TempDir()
+
+	// simulate a 100MB layer with 1MB chunks
+	chunkSize := 1024 * 1024
+	numChunks := 100
+	chunkData := make([]byte, chunkSize)
+
+	// write chunks to disk
+	for i := range numChunks {
+		path := fmt.Sprintf("%s/chunk-%05d", dir, i)
+		if err := os.WriteFile(path, chunkData, 0644); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	b.SetBytes(int64(numChunks * chunkSize))
+
+	for b.Loop() {
+		for i := range numChunks {
+			path := fmt.Sprintf("%s/chunk-%05d", dir, i)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				b.Fatal(err)
+			}
+			xxhash.Sum64(data)
+		}
+	}
+}
+
+// BenchmarkChunkVerificationParallel simulates parallel chunk verification
+func BenchmarkChunkVerificationParallel(b *testing.B) {
+	dir := b.TempDir()
+
+	chunkSize := 1024 * 1024
+	numChunks := 100
+	chunkData := make([]byte, chunkSize)
+
+	for i := range numChunks {
+		path := fmt.Sprintf("%s/chunk-%05d", dir, i)
+		if err := os.WriteFile(path, chunkData, 0644); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	b.SetBytes(int64(numChunks * chunkSize))
+
+	for b.Loop() {
+		var wg sync.WaitGroup
+		for i := range numChunks {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				path := fmt.Sprintf("%s/chunk-%05d", dir, idx)
+				data, _ := os.ReadFile(path)
+				xxhash.Sum64(data)
+			}(i)
+		}
+		wg.Wait()
+	}
 }

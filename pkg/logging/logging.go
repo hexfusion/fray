@@ -8,6 +8,35 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+// Logger is the interface for structured logging.
+type Logger interface {
+	Debug(msg string, fields ...zap.Field)
+	Info(msg string, fields ...zap.Field)
+	Warn(msg string, fields ...zap.Field)
+	Error(msg string, fields ...zap.Field)
+	With(fields ...zap.Field) Logger
+	Sync() error
+}
+
+// zapLogger wraps *zap.Logger to implement Logger interface.
+type zapLogger struct {
+	*zap.Logger
+}
+
+func (z *zapLogger) With(fields ...zap.Field) Logger {
+	return &zapLogger{z.Logger.With(fields...)}
+}
+
+// Wrap converts a *zap.Logger to the Logger interface.
+func Wrap(l *zap.Logger) Logger {
+	return &zapLogger{l}
+}
+
+// Nop returns a no-op logger.
+func Nop() Logger {
+	return &zapLogger{zap.NewNop()}
+}
+
 // Config configures the logger.
 type Config struct {
 	// minimum log level (debug, info, warn, error)
@@ -37,8 +66,8 @@ func DefaultConfig() Config {
 	}
 }
 
-// New creates a new zap logger with the given configuration.
-func New(cfg Config) (*zap.Logger, error) {
+// New creates a new logger with the given configuration.
+func New(cfg Config) (Logger, error) {
 	level, err := zapcore.ParseLevel(cfg.Level)
 	if err != nil {
 		level = zapcore.InfoLevel
@@ -87,10 +116,20 @@ func New(cfg Config) (*zap.Logger, error) {
 		logger = logger.WithOptions(zap.AddCaller())
 	}
 
-	return logger, nil
+	return &zapLogger{logger}, nil
 }
 
 // NewNop returns a no-op logger for testing.
-func NewNop() *zap.Logger {
-	return zap.NewNop()
+func NewNop() Logger {
+	return &zapLogger{zap.NewNop()}
+}
+
+// NewConsole creates a console logger suitable for CLI use.
+func NewConsole() Logger {
+	cfg := zap.NewDevelopmentConfig()
+	cfg.EncoderConfig.TimeKey = ""
+	cfg.EncoderConfig.CallerKey = ""
+	cfg.DisableStacktrace = true
+	log, _ := cfg.Build()
+	return &zapLogger{log}
 }

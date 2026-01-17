@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/hexfusion/fray/pkg/logging"
 	"github.com/hexfusion/fray/pkg/oci"
 	"github.com/hexfusion/fray/pkg/store"
 )
@@ -20,7 +21,6 @@ func TestDefaultOptions(t *testing.T) {
 	require.Equal(DefaultChunkSize, opts.ChunkSize)
 	require.Equal(DefaultParallel, opts.Parallel)
 	require.Equal(DefaultPullTimeout, opts.PullTimeout)
-	require.Nil(opts.Logger)
 }
 
 func TestNewServer(t *testing.T) {
@@ -60,7 +60,7 @@ func TestNewServer(t *testing.T) {
 			require.NoError(err)
 
 			client := oci.NewClient()
-			s := New(l, client, tt.opts)
+			s := New(l, client, logging.Nop(), tt.opts)
 
 			require.Equal(tt.wantChunkSize, s.opts.ChunkSize)
 			require.Equal(tt.wantParallel, s.opts.Parallel)
@@ -118,7 +118,7 @@ func TestHandleVersion(t *testing.T) {
 	require.NoError(err)
 
 	client := oci.NewClient()
-	s := New(l, client, DefaultOptions())
+	s := New(l, client, logging.Nop(), DefaultOptions())
 
 	req := httptest.NewRequest(http.MethodGet, "/v2/", nil)
 	w := httptest.NewRecorder()
@@ -152,7 +152,7 @@ func TestServeHTTPRouting(t *testing.T) {
 			require.NoError(err)
 
 			client := oci.NewClient()
-			s := New(l, client, DefaultOptions())
+			s := New(l, client, logging.Nop(), DefaultOptions())
 
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -172,7 +172,7 @@ func TestHandleBlobNotFound(t *testing.T) {
 	require.NoError(err)
 
 	client := oci.NewClient()
-	s := New(l, client, DefaultOptions())
+	s := New(l, client, logging.Nop(), DefaultOptions())
 
 	req := httptest.NewRequest(http.MethodGet, "/v2/quay.io/test/repo/blobs/sha256:notexist", nil)
 	w := httptest.NewRecorder()
@@ -196,7 +196,7 @@ func TestHandleBlobExists(t *testing.T) {
 	require.NoError(err)
 
 	client := oci.NewClient()
-	s := New(l, client, DefaultOptions())
+	s := New(l, client, logging.Nop(), DefaultOptions())
 
 	// GET request
 	req := httptest.NewRequest(http.MethodGet, "/v2/quay.io/test/repo/blobs/sha256:abc123", nil)
@@ -222,7 +222,7 @@ func TestHandleBlobHead(t *testing.T) {
 	require.NoError(err)
 
 	client := oci.NewClient()
-	s := New(l, client, DefaultOptions())
+	s := New(l, client, logging.Nop(), DefaultOptions())
 
 	req := httptest.NewRequest(http.MethodHead, "/v2/quay.io/test/repo/blobs/sha256:headtest", nil)
 	w := httptest.NewRecorder()

@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/hexfusion/fray/pkg/logging"
 	"github.com/hexfusion/fray/pkg/merkle"
 	"github.com/hexfusion/fray/pkg/oci"
 )
@@ -22,7 +23,6 @@ type PullOptions struct {
 	ChunkSize  int
 	Parallel   int
 	StateDir   string
-	Logger     *zap.Logger
 	OnProgress func(layer int, progress float64)
 }
 
@@ -30,11 +30,12 @@ type PullOptions struct {
 type Puller struct {
 	layout *Layout
 	client *oci.Client
+	log    logging.Logger
 	opts   PullOptions
 }
 
 // NewPuller creates a puller with the given options.
-func NewPuller(layout *Layout, client *oci.Client, opts PullOptions) *Puller {
+func NewPuller(layout *Layout, client *oci.Client, log logging.Logger, opts PullOptions) *Puller {
 	if opts.ChunkSize == 0 {
 		opts.ChunkSize = 1024 * 1024
 	}
@@ -47,15 +48,9 @@ func NewPuller(layout *Layout, client *oci.Client, opts PullOptions) *Puller {
 	return &Puller{
 		layout: layout,
 		client: client,
+		log:    log,
 		opts:   opts,
 	}
-}
-
-func (p *Puller) log() *zap.Logger {
-	if p.opts.Logger != nil {
-		return p.opts.Logger
-	}
-	return zap.NewNop()
 }
 
 // PullResult contains pull operation results.
@@ -101,10 +96,23 @@ func (p *Puller) Pull(ctx context.Context, image string) (*PullResult, error) {
 	}
 
 	result.Layers = len(manifest.Layers)
+	p.log.Debug("starting layer downloads",
+		zap.Int("layers", len(manifest.Layers)),
+		zap.String("image", image))
+
 	for i, layer := range manifest.Layers {
 		result.TotalSize += layer.Size
 
+		p.log.Debug("processing layer",
+			zap.Int("layer", i),
+			zap.Int("total", len(manifest.Layers)),
+			zap.String("digest", layer.Digest),
+			zap.Int64("size", layer.Size))
+
 		if p.layout.HasBlob(layer.Digest) {
+			p.log.Debug("layer cached",
+				zap.Int("layer", i),
+				zap.String("digest", layer.Digest))
 			result.Cached += layer.Size
 			if p.opts.OnProgress != nil {
 				p.opts.OnProgress(i, 1.0)
@@ -116,6 +124,10 @@ func (p *Puller) Pull(ctx context.Context, image string) (*PullResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("layer %d: %w", i, err)
 		}
+		p.log.Debug("layer downloaded",
+			zap.Int("layer", i),
+			zap.String("digest", layer.Digest),
+			zap.Int64("bytes", downloaded))
 		result.Downloaded += downloaded
 	}
 
@@ -145,13 +157,52 @@ func (p *Puller) downloadBlob(ctx context.Context, registry, repo, digest string
 	return err
 }
 
+func (p *Puller) downloadLayerFull(ctx context.Context, registry, repo string, layer oci.Blob) (int64, error) {
+	r, err := p.client.GetBlob(ctx, registry, repo, layer.Digest)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+
+	n, err := p.layout.WriteBlob(layer.Digest, r)
+	if err != nil {
+		return 0, err
+	}
+
+	return n, nil
+}
+
 func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo string, layer oci.Blob, layerIdx int) (int64, error) {
+	// check if registry supports range requests
+	supportsRange, err := p.client.SupportsRange(ctx, registry, repo, layer.Digest)
+	if err != nil {
+		p.log.Debug("range check failed, falling back to full download", zap.Error(err))
+		supportsRange = false
+	}
+
+	if !supportsRange {
+		p.log.Debug("registry does not support range requests, using full download",
+			zap.String("registry", registry),
+			zap.String("digest", layer.Digest))
+		return p.downloadLayerFull(ctx, registry, repo, layer)
+	}
+
 	tree, statePath, err := p.loadOrCreateTree(layer.Digest, layer.Size)
 	if err != nil {
 		return 0, err
 	}
 
+	p.log.Debug("chunked download state",
+		zap.Int("layer", layerIdx),
+		zap.Int("total_chunks", tree.NumChunks),
+		zap.Int("present", tree.PresentCount),
+		zap.Int("missing", tree.NumChunks-tree.PresentCount),
+		zap.Int("chunk_size", tree.ChunkSize))
+
 	if tree.Complete() {
+		p.log.Debug("layer already complete, finalizing",
+			zap.Int("layer", layerIdx),
+			zap.String("digest", layer.Digest))
 		if err := p.layout.FinalizeBlob(layer.Digest); err != nil {
 			return 0, err
 		}
@@ -160,7 +211,18 @@ func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo stri
 	}
 
 	downloaded := int64(0)
-	for _, r := range tree.MissingRanges() {
+	missingRanges := tree.MissingRanges()
+	totalMissing := 0
+	for _, r := range missingRanges {
+		totalMissing += r[1] - r[0]
+	}
+
+	p.log.Debug("downloading missing chunks",
+		zap.Int("layer", layerIdx),
+		zap.Int("chunks", totalMissing),
+		zap.Int("ranges", len(missingRanges)))
+
+	for _, r := range missingRanges {
 		for chunkIdx := r[0]; chunkIdx < r[1]; chunkIdx++ {
 			offset := tree.ChunkOffset(chunkIdx)
 			length := int64(tree.ChunkLength(chunkIdx))
@@ -181,6 +243,14 @@ func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo stri
 				return downloaded, errors.Join(fmt.Errorf("set chunk %d: %w", chunkIdx, err), saveErr)
 			}
 			downloaded += int64(len(data))
+
+			p.log.Debug("chunk downloaded",
+				zap.Int("layer", layerIdx),
+				zap.Int("chunk", chunkIdx),
+				zap.Int("total_chunks", tree.NumChunks),
+				zap.Int64("offset", offset),
+				zap.Int("bytes", len(data)),
+				zap.Float64("progress", tree.Progress()*100))
 
 			if p.opts.OnProgress != nil {
 				p.opts.OnProgress(layerIdx, tree.Progress())
@@ -203,7 +273,7 @@ func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo stri
 	}
 
 	if err := os.Remove(statePath); err != nil && !os.IsNotExist(err) {
-		p.log().Debug("cleanup state file", zap.String("path", statePath), zap.Error(err))
+		p.log.Debug("cleanup state file", zap.String("path", statePath), zap.Error(err))
 	}
 	return downloaded, nil
 }
@@ -215,7 +285,16 @@ func (p *Puller) downloadChunk(ctx context.Context, registry, repo, digest strin
 	}
 	defer r.Close()
 
-	return io.ReadAll(r)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if int64(len(data)) != length {
+		return nil, fmt.Errorf("%w: expected %d, got %d", ErrRangeMismatch, length, len(data))
+	}
+
+	return data, nil
 }
 
 func (p *Puller) loadOrCreateTree(digest string, size int64) (*merkle.Tree, string, error) {
@@ -232,12 +311,53 @@ func (p *Puller) loadOrCreateTree(digest string, size int64) (*merkle.Tree, stri
 	if _, err := os.Stat(statePath); err == nil {
 		tree, err := merkle.LoadFromFile(statePath)
 		if err == nil {
+			// verify existing chunks on resume
+			corrupted := p.verifyChunks(digest, tree)
+			if len(corrupted) > 0 {
+				p.log.Info("found corrupted chunks, will re-download",
+					zap.Int("count", len(corrupted)),
+					zap.String("digest", digestHash))
+				for _, idx := range corrupted {
+					tree.ClearChunk(idx)
+				}
+				p.saveTree(tree, statePath)
+			}
 			return tree, statePath, nil
 		}
 	}
 
 	tree := merkle.New(size, p.opts.ChunkSize)
 	return tree, statePath, nil
+}
+
+func (p *Puller) verifyChunks(digest string, tree *merkle.Tree) []int {
+	var corrupted []int
+
+	for i := 0; i < tree.NumChunks; i++ {
+		if tree.Leaves[i].IsEmpty() {
+			continue
+		}
+
+		offset := tree.ChunkOffset(i)
+		length := tree.ChunkLength(i)
+
+		data, err := p.layout.ReadBlobAt(digest, offset, length)
+		if err != nil {
+			corrupted = append(corrupted, i)
+			continue
+		}
+
+		if len(data) != length {
+			corrupted = append(corrupted, i)
+			continue
+		}
+
+		if merkle.HashData(data) != tree.Leaves[i] {
+			corrupted = append(corrupted, i)
+		}
+	}
+
+	return corrupted
 }
 
 func (p *Puller) saveTree(tree *merkle.Tree, path string) error {

@@ -19,6 +19,7 @@ var (
 	ErrDigestMismatch    = errors.New("digest mismatch")
 	ErrLayerIncomplete   = errors.New("layer incomplete")
 	ErrChunkSizeMismatch = errors.New("chunk size mismatch")
+	ErrRangeMismatch     = errors.New("range response size mismatch")
 )
 
 const (
