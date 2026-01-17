@@ -33,7 +33,7 @@ func main() {
 	defer func() { _ = log.Sync() }()
 
 	if len(os.Args) < 2 {
-		printUsage(log)
+		printUsage()
 		os.Exit(1)
 	}
 
@@ -49,7 +49,7 @@ func main() {
 	case "version":
 		cmdVersion(os.Args[2:])
 	case "help", "-h", "--help":
-		printUsage(log)
+		printUsage()
 	default:
 		log.Error("unknown command", zap.String("command", os.Args[1]))
 		os.Exit(1)
@@ -69,18 +69,19 @@ func defaultCacheDir() string {
 	return "./fray-cache"
 }
 
-func printUsage(log logging.Logger) {
-	log.Info("fray - edge-native OCI image puller",
-		zap.String("usage", "fray <command> [options]"),
-	)
-	log.Info("commands",
-		zap.String("pull", "pull image to OCI layout"),
-		zap.String("proxy", "run pull-through caching proxy"),
-		zap.String("status", "show layout status"),
-		zap.String("prune", "remove incomplete downloads and temp files"),
-		zap.String("version", "show version information"),
-	)
-	log.Info("run 'fray <command> -h' for command options")
+func printUsage() {
+	fmt.Println("fray - edge-native OCI image puller")
+	fmt.Println()
+	fmt.Println("Usage: fray <command> [options]")
+	fmt.Println()
+	fmt.Println("Commands:")
+	fmt.Println("  pull     Pull image to OCI layout")
+	fmt.Println("  proxy    Run pull-through caching proxy")
+	fmt.Println("  status   Show layout status")
+	fmt.Println("  prune    Remove incomplete downloads and temp files")
+	fmt.Println("  version  Show version information")
+	fmt.Println()
+	fmt.Println("Run 'fray <command> -h' for command options")
 }
 
 func cmdVersion(args []string) {
@@ -112,6 +113,7 @@ func cmdPull(log logging.Logger, args []string) {
 	output := fs.String("o", defaultCacheDir(), "output directory")
 	chunkSize := fs.Int("c", 1024*1024, "chunk size in bytes")
 	parallel := fs.Int("p", 4, "parallel downloads")
+	silent := fs.Bool("s", false, "silent mode, suppress progress output")
 
 	if err := fs.Parse(args); err != nil {
 		os.Exit(1)
@@ -140,14 +142,27 @@ func cmdPull(log logging.Logger, args []string) {
 		zap.String("output", *output),
 	)
 
+	var progress float64
+	var done bool
+	spinner := []rune{'|', '/', '-', '\\'}
+
+	// spinner goroutine
+	if !*silent {
+		go func() {
+			i := 0
+			for !done {
+				fmt.Printf("\r%d%% %c  ", int(progress), spinner[i%len(spinner)])
+				i++
+				time.Sleep(100 * time.Millisecond)
+			}
+		}()
+	}
+
 	opts := store.PullOptions{
 		ChunkSize: *chunkSize,
 		Parallel:  *parallel,
-		OnProgress: func(layer int, progress float64) {
-			log.Debug("progress",
-				zap.Int("layer", layer),
-				zap.Float64("percent", progress*100),
-			)
+		OnProgress: func(current, total int, layerProgress float64) {
+			progress = (float64(current) + layerProgress) / float64(total) * 100
 		},
 	}
 
@@ -155,6 +170,10 @@ func cmdPull(log logging.Logger, args []string) {
 	start := time.Now()
 
 	result, err := puller.Pull(ctx, image)
+	done = true
+	if !*silent {
+		fmt.Printf("\r100%%    \n") // clear spinner and show complete
+	}
 	if err != nil {
 		log.Error("pull failed", zap.Error(err))
 		os.Exit(1)

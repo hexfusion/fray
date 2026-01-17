@@ -23,7 +23,7 @@ type PullOptions struct {
 	ChunkSize  int
 	Parallel   int
 	StateDir   string
-	OnProgress func(layer int, progress float64)
+	OnProgress func(current, total int, layerProgress float64)
 }
 
 // Puller downloads images to an OCI layout with resumable chunked transfers.
@@ -100,12 +100,13 @@ func (p *Puller) Pull(ctx context.Context, image string) (*PullResult, error) {
 		zap.Int("layers", len(manifest.Layers)),
 		zap.String("image", image))
 
+	totalLayers := len(manifest.Layers)
 	for i, layer := range manifest.Layers {
 		result.TotalSize += layer.Size
 
 		p.log.Debug("processing layer",
 			zap.Int("layer", i),
-			zap.Int("total", len(manifest.Layers)),
+			zap.Int("total", totalLayers),
 			zap.String("digest", layer.Digest),
 			zap.Int64("size", layer.Size))
 
@@ -115,12 +116,12 @@ func (p *Puller) Pull(ctx context.Context, image string) (*PullResult, error) {
 				zap.String("digest", layer.Digest))
 			result.Cached += layer.Size
 			if p.opts.OnProgress != nil {
-				p.opts.OnProgress(i, 1.0)
+				p.opts.OnProgress(i, totalLayers, 1.0)
 			}
 			continue
 		}
 
-		downloaded, err := p.downloadLayerResumable(ctx, registry, repo, layer, i)
+		downloaded, err := p.downloadLayerResumable(ctx, registry, repo, layer, i, totalLayers)
 		if err != nil {
 			return nil, fmt.Errorf("layer %d: %w", i, err)
 		}
@@ -172,7 +173,7 @@ func (p *Puller) downloadLayerFull(ctx context.Context, registry, repo string, l
 	return n, nil
 }
 
-func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo string, layer oci.Blob, layerIdx int) (int64, error) {
+func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo string, layer oci.Blob, layerIdx, totalLayers int) (int64, error) {
 	// check if registry supports range requests
 	supportsRange, err := p.client.SupportsRange(ctx, registry, repo, layer.Digest)
 	if err != nil {
@@ -187,9 +188,18 @@ func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo stri
 		return p.downloadLayerFull(ctx, registry, repo, layer)
 	}
 
-	tree, statePath, err := p.loadOrCreateTree(layer.Digest, layer.Size)
+	tree, statePath, resumed, err := p.loadOrCreateTree(layer.Digest, layer.Size)
 	if err != nil {
 		return 0, err
+	}
+
+	if resumed && tree.PresentCount > 0 {
+		p.log.Debug("resuming layer",
+			zap.Int("layer", layerIdx),
+			zap.String("digest", layer.Digest[:19]),
+			zap.Int("chunks_complete", tree.PresentCount),
+			zap.Int("chunks_remaining", tree.NumChunks-tree.PresentCount),
+			zap.String("progress", fmt.Sprintf("%.1f%%", tree.Progress()*100)))
 	}
 
 	p.log.Debug("chunked download state",
@@ -253,7 +263,7 @@ func (p *Puller) downloadLayerResumable(ctx context.Context, registry, repo stri
 				zap.Float64("progress", tree.Progress()*100))
 
 			if p.opts.OnProgress != nil {
-				p.opts.OnProgress(layerIdx, tree.Progress())
+				p.opts.OnProgress(layerIdx, totalLayers, tree.Progress())
 			}
 
 			if chunkIdx%10 == 0 {
@@ -297,9 +307,9 @@ func (p *Puller) downloadChunk(ctx context.Context, registry, repo, digest strin
 	return data, nil
 }
 
-func (p *Puller) loadOrCreateTree(digest string, size int64) (*merkle.Tree, string, error) {
+func (p *Puller) loadOrCreateTree(digest string, size int64) (*merkle.Tree, string, bool, error) {
 	if err := os.MkdirAll(p.opts.StateDir, 0755); err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 
 	digestHash := strings.TrimPrefix(digest, "sha256:")
@@ -322,12 +332,12 @@ func (p *Puller) loadOrCreateTree(digest string, size int64) (*merkle.Tree, stri
 				}
 				p.saveTree(tree, statePath)
 			}
-			return tree, statePath, nil
+			return tree, statePath, true, nil
 		}
 	}
 
 	tree := merkle.New(size, p.opts.ChunkSize)
-	return tree, statePath, nil
+	return tree, statePath, false, nil
 }
 
 func (p *Puller) verifyChunks(digest string, tree *merkle.Tree) []int {
