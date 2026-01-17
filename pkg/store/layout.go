@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -201,6 +202,28 @@ func (l *Layout) WriteBlobAt(digest string, offset int64, data []byte) error {
 	}
 
 	return nil
+}
+
+// ReadBlobAt reads data from a partial blob at the given offset.
+func (l *Layout) ReadBlobAt(digest string, offset int64, length int) ([]byte, error) {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	path := l.blobPath(digest) + ".partial"
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	data := make([]byte, length)
+	n, err := f.ReadAt(data, offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+
+	return data[:n], nil
 }
 
 // FinalizeBlob moves a partial blob to its final location.

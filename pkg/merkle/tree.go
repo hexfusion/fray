@@ -80,6 +80,18 @@ func (t *Tree) SetChunk(index int, data []byte) error {
 	return nil
 }
 
+// ClearChunk marks a chunk as missing (for re-download after corruption).
+func (t *Tree) ClearChunk(index int) {
+	if index < 0 || index >= t.NumChunks {
+		return
+	}
+
+	if !t.Leaves[index].IsEmpty() {
+		t.Leaves[index] = EmptyHash
+		t.PresentCount--
+	}
+}
+
 // SetChunkHash marks a chunk as present with a precomputed hash.
 func (t *Tree) SetChunkHash(index int, h Hash) error {
 	if index < 0 || index >= t.NumChunks {
