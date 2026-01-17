@@ -127,6 +127,7 @@ func NewNop() Logger {
 // NewConsole creates a console logger suitable for CLI use.
 func NewConsole() Logger {
 	cfg := zap.NewDevelopmentConfig()
+	cfg.Level = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 	cfg.EncoderConfig.TimeKey = ""
 	cfg.EncoderConfig.CallerKey = ""
 	cfg.DisableStacktrace = true

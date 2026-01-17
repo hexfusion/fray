@@ -1,6 +1,6 @@
 .PHONY: build clean test test-unit test-e2e test-e2e-integration test-integration lint install release image push
 
-BINARY := fray
+BINARY := bin/fray
 IMAGE_REPO ?= ghcr.io/hexfusion/fray
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
@@ -15,10 +15,11 @@ LDFLAGS := -s -w \
 	-X $(VERSION_PKG).gitTreeState=$(GIT_TREE_STATE)
 
 build:
+	@mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/fray
 
 clean:
-	rm -f $(BINARY)
+	rm -rf bin/
 	rm -rf dist/
 
 test: test-unit test-e2e
