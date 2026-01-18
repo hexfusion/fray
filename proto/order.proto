@@ -1,0 +1,197 @@
+// Example: Order with validation, formats, and state machine transitions.
+//
+// Demonstrates the DX hierarchy: Types > Shorthand > Raw CEL
+
+syntax = "proto3";
+
+package examples.order;
+
+import "annotations.proto";
+
+option go_package = "github.com/hexfusion/fray/gen/order;order";
+
+// OrderStatus represents the lifecycle of an order.
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  CONFIRMED = 2;
+  PROCESSING = 3;
+  SHIPPED = 4;
+  DELIVERED = 5;
+  CANCELLED = 6;
+  REFUNDED = 7;
+}
+
+// Order represents a customer order with full validation.
+message Order {
+  // Message-level CEL validation using proto reflection.
+  option (cel.message).validate = {
+    expr: "size(self.items) > 0"
+    message: "order must have at least one item"
+  };
+
+  // Message-level transition rule.
+  option (cel.message).transition = {
+    expr: "self.version > oldSelf.version"
+    message: "version must increase on update"
+  };
+
+  // ID: required UUID, immutable after creation
+  string id = 1 [(cel.field) = {
+    required: true
+    format: UUID
+    immutable: true
+  }];
+
+  // Customer ID: required UUID, immutable
+  string customer_id = 2 [(cel.field) = {
+    required: true
+    format: UUID
+    immutable: true
+  }];
+
+  // Customer email for notifications
+  string customer_email = 3 [(cel.field) = {
+    required: true
+    format: EMAIL
+  }];
+
+  // Status follows a state machine.
+  OrderStatus status = 4 [(cel.field).transitions = {
+    rules: [
+      {
+        from: ["PENDING"]
+        to: [
+          "CONFIRMED",
+          "CANCELLED"
+        ]
+      },
+      {
+        from: ["CONFIRMED"]
+        to: [
+          "PROCESSING",
+          "CANCELLED"
+        ]
+      },
+      {
+        from: ["PROCESSING"]
+        to: [
+          "SHIPPED",
+          "CANCELLED"
+        ]
+      },
+      {
+        from: ["SHIPPED"]
+        to: [
+          "DELIVERED",
+          "REFUNDED"
+        ]
+      },
+      {
+        from: ["DELIVERED"]
+        to: ["REFUNDED"]
+      }
+    ]
+    deny_unlisted: true
+  }];
+
+  // Total amount: minimum 0, can only increase on update
+  int64 total_cents = 5 [(cel.field) = {
+    min: 0
+    transition: {
+      expr: "this >= oldSelf"
+      message: "total can only increase"
+    }
+  }];
+
+  // Version for optimistic locking
+  int64 version = 6 [(cel.field).min = 1];
+
+  // Items in the order
+  repeated OrderItem items = 7;
+
+  // Timestamps
+  string created_at = 8 [(cel.field) = {
+    format: DATETIME
+    immutable: true
+  }];
+  string updated_at = 9 [(cel.field).format = DATETIME];
+
+  // Shipping address - DNS subdomain for internal routing
+  string shipping_zone = 10 [(cel.field).format = DNS_SUBDOMAIN];
+}
+
+// OrderItem represents a line item in an order.
+message OrderItem {
+  // Product ID: UUID, immutable
+  string product_id = 1 [(cel.field) = {
+    required: true
+    format: UUID
+    immutable: true
+  }];
+
+  // Quantity: at least 1
+  int32 quantity = 2 [(cel.field) = {
+    min: 1
+    max: 1000
+  }];
+
+  // Price in cents: non-negative
+  int64 price_cents = 3 [(cel.field).min = 0];
+
+  // SKU: alphanumeric pattern
+  string sku = 4 [(cel.field) = {
+    required: true
+    min_len: 3
+    max_len: 20
+    pattern: "^[A-Z0-9-]+$"
+  }];
+}
+
+// OrderService provides CRUD operations for orders.
+service OrderService {
+  rpc CreateOrder(CreateOrderRequest) returns (CreateOrderResponse);
+  rpc GetOrder(GetOrderRequest) returns (GetOrderResponse);
+  rpc UpdateOrder(UpdateOrderRequest) returns (UpdateOrderResponse);
+  rpc ListOrders(ListOrdersRequest) returns (ListOrdersResponse);
+}
+
+message CreateOrderRequest {
+  Order order = 1;
+}
+
+message CreateOrderResponse {
+  Order order = 1;
+}
+
+message GetOrderRequest {
+  string id = 1 [(cel.field) = {
+    required: true
+    format: UUID
+  }];
+}
+
+message GetOrderResponse {
+  Order order = 1;
+}
+
+message UpdateOrderRequest {
+  Order order = 1;
+}
+
+message UpdateOrderResponse {
+  Order order = 1;
+}
+
+message ListOrdersRequest {
+  int32 page_size = 1 [(cel.field) = {
+    min: 1
+    max: 100
+  }];
+  string page_token = 2;
+}
+
+message ListOrdersResponse {
+  repeated Order orders = 1;
+  string next_page_token = 2;
+}

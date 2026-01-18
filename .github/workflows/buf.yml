@@ -1,0 +1,63 @@
+name: Buf
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'proto/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'proto/**'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Lint
+        run: cd proto && buf lint
+
+      - name: Format check
+        run: cd proto && buf format --diff --exit-code
+
+  breaking:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Check breaking changes
+        run: |
+          if git ls-tree origin/main --name-only | grep -q '^proto$'; then
+            cd proto && buf breaking --against 'https://github.com/${{ github.repository }}.git#branch=main,subdir=proto'
+          else
+            echo "Skipping: proto/ not on main yet"
+          fi
+
+  push:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Push to BSR
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: cd proto && buf push

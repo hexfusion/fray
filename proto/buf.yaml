@@ -1,0 +1,15 @@
+version: v2
+modules:
+  - path: .
+    name: buf.build/fray/protoc-gen-cel
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+    - ENUM_VALUE_PREFIX
+    - DIRECTORY_SAME_PACKAGE
+breaking:
+  use:
+    - FILE

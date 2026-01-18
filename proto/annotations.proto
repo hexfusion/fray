@@ -1,0 +1,189 @@
+// CEL-based validation for proto fields.
+//
+// Provides declarative validation with good DX:
+//   Types > Shorthand > Raw CEL
+//
+// https://github.com/hexfusion/fray
+
+syntax = "proto3";
+
+package cel;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/hexfusion/fray/gen/cel;cel";
+
+// ============================================================================
+// FIELD OPTIONS
+// ============================================================================
+
+extend google.protobuf.FieldOptions {
+  FieldRules field = 1160;
+}
+
+message FieldRules {
+  // -------------------------------------------------------------------------
+  // Create-time Validation (evaluated on CREATE and UPDATE)
+  // -------------------------------------------------------------------------
+
+  // Well-known format types. Best DX - just declare the type.
+  //
+  // Example:
+  //   string email = 1 [(cel.field).format = EMAIL];
+  //   string name = 2 [(cel.field).format = DNS_LABEL];
+  optional Format format = 10;
+
+  // Shorthand validators. Good DX - common constraints.
+  bool required = 11; // Must be set/non-empty
+  optional int64 min = 12; // Numeric minimum (inclusive)
+  optional int64 max = 13; // Numeric maximum (inclusive)
+  optional int64 min_len = 14; // Min length (string/bytes/list)
+  optional int64 max_len = 15; // Max length (string/bytes/list)
+  optional string pattern = 16; // Regex pattern for strings
+
+  // Raw CEL validation rules. Fallback for custom logic.
+  // Variable 'this' refers to the field value.
+  //
+  // Example:
+  //   int32 port = 1 [(cel.field).validate = {
+  //     expr: "this >= 1024 && this <= 65535",
+  //     message: "port must be in unprivileged range"
+  //   }];
+  repeated Rule validate = 17;
+
+  // -------------------------------------------------------------------------
+  // Update-time Validation (evaluated only on UPDATE with oldSelf)
+  // -------------------------------------------------------------------------
+
+  // CEL rules comparing new value to old value.
+  // Variables: 'this' (new), 'oldSelf' (previous)
+  //
+  // Example:
+  //   string version = 1 [(cel.field).transition = {
+  //     expr: "this >= oldSelf",
+  //     message: "version cannot be downgraded"
+  //   }];
+  repeated Rule transition = 20;
+
+  // Field cannot change after creation.
+  //
+  // Example:
+  //   string id = 1 [(cel.field).immutable = true];
+  bool immutable = 21;
+
+  // State machine transitions for enum fields.
+  //
+  // Example:
+  //   Status status = 1 [(cel.field).transitions = {
+  //     rules: [
+  //       { from: ["PENDING"], to: ["ACTIVE", "CANCELLED"] },
+  //       { from: ["ACTIVE"], to: ["COMPLETED", "FAILED"] }
+  //     ],
+  //     deny_unlisted: true
+  //   }];
+  optional StateTransitions transitions = 22;
+}
+
+// Well-known formats with hardened validation.
+// These map to specific regex patterns and/or validation functions.
+enum Format {
+  FORMAT_UNSPECIFIED = 0;
+
+  // Network/Internet
+  EMAIL = 1; // RFC 5322 email address
+  URI = 2; // RFC 3986 URI
+  URI_REF = 3; // RFC 3986 URI reference
+  HOSTNAME = 4; // RFC 1123 hostname
+  IPV4 = 5; // IPv4 address
+  IPV6 = 6; // IPv6 address
+  IP = 7; // IPv4 or IPv6
+
+  // Identifiers
+  UUID = 10; // RFC 4122 UUID (any version)
+  UUID_V4 = 11; // UUID version 4
+
+  // Kubernetes/Cloud Native
+  DNS_LABEL = 20; // RFC 1123 DNS label (max 63 chars, lowercase)
+  DNS_SUBDOMAIN = 21; // RFC 1123 DNS subdomain (max 253 chars)
+  QUALIFIED_NAME = 22; // Kubernetes qualified name (prefix/name)
+
+  // Container/OCI
+  IMAGE_REF = 30; // Container image reference
+  IMAGE_TAG = 31; // Container image tag
+  IMAGE_DIGEST = 32; // Container image digest (sha256:...)
+
+  // Time
+  DATE = 40; // RFC 3339 date (YYYY-MM-DD)
+  DATETIME = 41; // RFC 3339 datetime
+  DURATION = 42; // Duration string (1h30m, etc.)
+
+  // Versioning
+  SEMVER = 50; // Semantic version (v1.2.3)
+
+  // Security
+  BASE64 = 60; // Base64 encoded string
+  PEM = 61; // PEM encoded certificate/key
+}
+
+// Rule defines a CEL expression with error message.
+message Rule {
+  // Optional identifier for the rule (for error reporting).
+  string id = 1;
+
+  // CEL expression that must evaluate to true.
+  // Variables available: 'this' (new value), 'oldSelf' (previous value)
+  string expr = 2;
+
+  // Error message when rule fails.
+  string message = 3;
+}
+
+// StateTransitions defines valid state changes for enum fields.
+message StateTransitions {
+  // List of allowed transitions.
+  repeated StateTransition rules = 1;
+
+  // If true, any transition not explicitly listed is denied.
+  // If false, unlisted transitions are allowed.
+  bool deny_unlisted = 2;
+}
+
+// StateTransition defines a single allowed transition.
+message StateTransition {
+  // Source states (enum value names).
+  repeated string from = 1;
+
+  // Target states (enum value names).
+  repeated string to = 2;
+}
+
+// ============================================================================
+// MESSAGE OPTIONS - Transition Rules
+// ============================================================================
+
+extend google.protobuf.MessageOptions {
+  MessageRules message = 1161;
+}
+
+message MessageRules {
+  // CEL validation rules for the entire message.
+  // Variable 'self' refers to the message.
+  //
+  // Example:
+  //   option (cel.message).validate = {
+  //     expr: "has(self.email) || has(self.phone)",
+  //     message: "must provide email or phone"
+  //   };
+  repeated Rule validate = 1;
+
+  // CEL transition rules for the entire message.
+  // Variables: 'self' (new), 'oldSelf' (previous)
+  // Only evaluated on UPDATE operations.
+  //
+  // Example:
+  //   option (cel.message).transition = {
+  //     expr: "self.version > oldSelf.version",
+  //     message: "version must increase on update"
+  //   };
+  repeated Rule transition = 2;
+}
