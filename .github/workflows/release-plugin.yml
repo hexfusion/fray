@@ -1,0 +1,83 @@
+name: Release protoc-gen-cel
+
+on:
+  push:
+    tags:
+      - 'cmd/protoc-gen-cel/v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: bufbuild/buf-setup-action@v1
+        with:
+          github_token: ${{ github.token }}
+
+      - name: Extract version
+        id: version
+        run: |
+          # Tag is cmd/protoc-gen-cel/v1.0.0, extract v1.0.0
+          VERSION=${GITHUB_REF#refs/tags/cmd/protoc-gen-cel/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Build plugin binaries
+        run: |
+          cd cmd/protoc-gen-cel
+
+          mkdir -p dist
+
+          GOOS=linux GOARCH=amd64 go build -o dist/protoc-gen-cel-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -o dist/protoc-gen-cel-linux-arm64 .
+          GOOS=darwin GOARCH=amd64 go build -o dist/protoc-gen-cel-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -o dist/protoc-gen-cel-darwin-arm64 .
+          GOOS=windows GOARCH=amd64 go build -o dist/protoc-gen-cel-windows-amd64.exe .
+
+      - name: Push proto module to buf.build
+        env:
+          BUF_TOKEN: ${{ secrets.BUF_TOKEN }}
+        run: |
+          cd proto
+          buf push --tag ${{ steps.version.outputs.version }}
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: protoc-gen-cel ${{ steps.version.outputs.version }}
+          files: cmd/protoc-gen-cel/dist/*
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ```bash
+            go install github.com/hexfusion/fray/cmd/protoc-gen-cel@${{ steps.version.outputs.version }}
+            ```
+
+            ## Proto module
+
+            ```yaml
+            # buf.yaml
+            deps:
+              - buf.build/fray/protoc-gen-cel:${{ steps.version.outputs.version }}
+            ```
+
+            ## Usage
+
+            ```yaml
+            # buf.gen.yaml
+            plugins:
+              - local: protoc-gen-cel
+                out: gen
+                opt:
+                  - paths=source_relative
+            ```

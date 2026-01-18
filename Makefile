@@ -1,4 +1,4 @@
-.PHONY: build clean test test-unit test-e2e test-e2e-integration test-integration lint install release image push
+.PHONY: build clean test test-unit test-e2e test-e2e-integration test-integration lint install release image push generate
 
 BINARY := bin/fray
 IMAGE_REPO ?= ghcr.io/hexfusion/fray
@@ -38,6 +38,13 @@ test-integration:
 
 lint:
 	golangci-lint run
+	cd proto && buf lint
+	cd proto && buf format --diff --exit-code
+	@if git ls-tree origin/main --name-only | grep -q '^proto$$'; then \
+		cd proto && buf breaking --against 'https://github.com/hexfusion/fray.git#branch=main,subdir=proto'; \
+	else \
+		echo "Skipping buf breaking: proto/ not on main yet"; \
+	fi
 
 install: build
 	install -m 755 $(BINARY) /usr/local/bin/
@@ -60,3 +67,7 @@ image:
 push:
 	podman manifest push $(IMAGE_REPO):$(VERSION) $(IMAGE_REPO):$(VERSION)
 	podman manifest push $(IMAGE_REPO):$(VERSION) $(IMAGE_REPO):latest
+
+generate:
+	cd cmd/protoc-gen-cel && go build -o ../../protoc-gen-cel .
+	cd proto && PATH="$(PWD):$(shell go env GOPATH)/bin:$(PATH)" go run github.com/bufbuild/buf/cmd/buf@latest generate

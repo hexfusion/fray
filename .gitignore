@@ -2,7 +2,7 @@
 /bin/
 /benchmark
 /dist/
-*.exe
+protoc-gen-cel
 
 # IDE
 .idea/
