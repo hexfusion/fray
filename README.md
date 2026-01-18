@@ -53,6 +53,7 @@ podman pull --tls-verify=false localhost:5000/docker.io/library/alpine:latest
 
 - [User Guide](docs/user/README.md) - commands, options, proxy setup
 - [Developer Guide](docs/dev/README.md) - architecture, building, testing
+- [protoc-gen-cel](docs/user/protoc-gen-cel.md) - CEL validation plugin for protobufs
 
 ## Deployment
 

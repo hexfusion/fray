@@ -2,7 +2,8 @@
 /bin/
 /benchmark
 /dist/
-protoc-gen-cel
+/protoc-gen-cel
+cmd/protoc-gen-cel/protoc-gen-cel
 
 # IDE
 .idea/
